@@ -1,51 +1,45 @@
 <?php
 declare(strict_types=1);
 
-class Mahasiswa {
-    private array $atributTambahan = [];
-
+abstract class Mahasiswa
+{
     public function __construct(
-        public string $nim,
-        public string $nama,
-        public string $fakultas = "Belum diisi",
-        public string $prodi = "",
-        public string $asalSekolah = "",
-        public int $semester = 1,
-        public string $hobi = "",
-        public string $agama = ""
+        private string $nim,
+        private string $nama,
+        private string $prodi,
+        private int $semester
     ) {
-        if ($nim === '' || $nama === '' || $semester < 1 || $semester > 14) {
-            throw new InvalidArgumentException('NIM, nama, dan semester harus valid.');
+        self::validasiProfil($nim, $nama, $prodi, $semester);
+        $this->nim = trim($nim);
+        $this->nama = trim($nama);
+        $this->prodi = trim($prodi);
+    }
+
+    private static function validasiProfil(string $nim, string $nama, string $prodi, int $semester): void
+    {
+        if (trim($nim) === '' || trim($nama) === '' || trim($prodi) === '') {
+            throw new InvalidArgumentException('NIM, nama, dan prodi wajib diisi.');
+        }
+        if ($semester < 1 || $semester > 14) {
+            throw new InvalidArgumentException('Semester harus berada di antara 1 hingga 14.');
         }
     }
 
-    public function ringkasan(): string {
-        return $this->nim . ' - ' . $this->nama;
+    public function getNim(): string { return $this->nim; }
+    public function getNama(): string { return $this->nama; }
+    public function getProdi(): string { return $this->prodi; }
+    public function getSemester(): int { return $this->semester; }
+
+    public function ubahProfil(string $nama, string $prodi, int $semester): void
+    {
+        self::validasiProfil($this->nim, $nama, $prodi, $semester);
+        $this->nama = trim($nama);
+        $this->prodi = trim($prodi);
+        $this->semester = $semester;
     }
 
-    public function __set(string $nama, mixed $nilai): void {
-        $this->atributTambahan[$nama] = $nilai;
-    }
-    public function __get(string $nama): mixed {
-        return $this->atributTambahan[$nama] ?? null;
-    }
-    public function __isset(string $nama): bool {
-        return isset($this->atributTambahan[$nama]);
-    }
-    public function __unset(string $nama): void {
-        unset($this->atributTambahan[$nama]);
-    }
-
-    public function __call(string $nama, array $argumen): mixed {
-        if ($nama === 'profilSingkat' && count($argumen) === 0) {
-            return $this->ringkasan();
-        }
-        throw new BadMethodCallException('Method tidak tersedia: ' . $nama);
-    }
-
-    public function __destruct() {
-        if (defined('DEMO_LIFECYCLE') && DEMO_LIFECYCLE) {
-            error_log('Destructor Mahasiswa: ' . $this->nim);
-        }
-    }
+    abstract public function getJenis(): string;
+    abstract public function hitungBiaya(): float;
+    abstract public function getUkt(): float;
+    abstract public function getPotonganPersen(): float;
 }

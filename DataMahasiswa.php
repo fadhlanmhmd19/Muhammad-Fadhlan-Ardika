@@ -1,36 +1,44 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/Mahasiswa.php';
+require_once __DIR__ . '/MahasiswaReguler.php';
+require_once __DIR__ . '/MahasiswaBeasiswa.php';
 
-class DataMahasiswa {
+final class DataMahasiswa
+{
     /** @var array<string, Mahasiswa> */
     private array $data = [];
 
-    public function __construct(array $dataAwal = []) {
-        foreach ($dataAwal as $item) {
-            if ($item instanceof Mahasiswa) {
-                $this->data[$item->nim] = $item;
-            }
-        }
-    }
-    public function tambah(Mahasiswa $m): bool {
-        if (isset($this->data[$m->nim])) return false;
-        $this->data[$m->nim] = $m;
+    public function tambah(Mahasiswa $m): bool
+    {
+        $nim = $m->getNim();
+        if (isset($this->data[$nim])) return false;
+        $this->data[$nim] = $m;
         return true;
     }
-    /** @return array<string, Mahasiswa> */
-    public function semua(): array { return $this->data; }
-    public function cari(string $nim): ?Mahasiswa {
+
+    public function cari(string $nim): ?Mahasiswa
+    {
         return $this->data[$nim] ?? null;
     }
-    public function ubah(string $nimLama, Mahasiswa $m): bool {
-        if (!isset($this->data[$nimLama])) return false;
-        if ($m->nim !== $nimLama && isset($this->data[$m->nim])) return false;
-        unset($this->data[$nimLama]);
-        $this->data[$m->nim] = $m;
+
+    /** @return array<string, Mahasiswa> */
+    public function semua(): array
+    {
+        return $this->data;
+    }
+
+    public function ubah(string $nim, Mahasiswa $pengganti): bool
+    {
+        if (!isset($this->data[$nim])) return false;
+        if ($pengganti->getNim() !== $nim) {
+            throw new InvalidArgumentException('NIM tidak boleh diubah.');
+        }
+        $this->data[$nim] = $pengganti;
         return true;
     }
-    public function hapus(string $nim): bool {
+
+    public function hapus(string $nim): bool
+    {
         if (!isset($this->data[$nim])) return false;
         unset($this->data[$nim]);
         return true;
