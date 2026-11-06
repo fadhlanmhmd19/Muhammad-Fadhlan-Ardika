@@ -1,39 +1,39 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/MahasiswaReguler.php';
-require_once __DIR__ . '/MahasiswaBeasiswa.php';
+require_once __DIR__ . '/Mahasiswa.php';
 
 final class DataMahasiswa
 {
     /** @var array<string, Mahasiswa> */
     private array $data = [];
 
-    public function tambah(Mahasiswa $m): bool
+    /** @param array<string, Mahasiswa> $dataAwal */
+    public function __construct(array $dataAwal = [])
     {
-        $nim = $m->getNim();
-        if (isset($this->data[$nim])) return false;
-        $this->data[$nim] = $m;
-        return true;
-    }
-
-    public function cari(string $nim): ?Mahasiswa
-    {
-        return $this->data[$nim] ?? null;
+        foreach ($dataAwal as $item) {
+            if ($item instanceof Mahasiswa) {
+                $this->data[$item->getNim()] = $item;
+            }
+        }
     }
 
     /** @return array<string, Mahasiswa> */
-    public function semua(): array
+    public function semua(): array { return $this->data; }
+
+    public function cari(string $nim): ?Mahasiswa { return $this->data[$nim] ?? null; }
+
+    public function tambah(Mahasiswa $mahasiswa): bool
     {
-        return $this->data;
+        $nim = $mahasiswa->getNim();
+        if (isset($this->data[$nim])) return false;
+        $this->data[$nim] = $mahasiswa;
+        return true;
     }
 
-    public function ubah(string $nim, Mahasiswa $pengganti): bool
+    public function ubah(string $nim, Mahasiswa $mahasiswa): bool
     {
-        if (!isset($this->data[$nim])) return false;
-        if ($pengganti->getNim() !== $nim) {
-            throw new InvalidArgumentException('NIM tidak boleh diubah.');
-        }
-        $this->data[$nim] = $pengganti;
+        if (!isset($this->data[$nim]) || $nim !== $mahasiswa->getNim()) return false;
+        $this->data[$nim] = $mahasiswa;
         return true;
     }
 

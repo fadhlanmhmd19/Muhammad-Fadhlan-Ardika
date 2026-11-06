@@ -1,230 +1,143 @@
 <?php
 declare(strict_types=1);
+
 require_once __DIR__ . '/DataMahasiswa.php';
 session_start();
 
-if (!isset($_SESSION['repository']) || !($_SESSION['repository'] instanceof DataMahasiswa)) {
-    $_SESSION['repository'] = new DataMahasiswa();
+function aman(mixed $nilai): string {
+    return htmlspecialchars((string)$nilai, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+function teksPost(string $kunci): string {
+     return trim((string)($_POST[$kunci] ?? ''));
 }
 
-/** @var DataMahasiswa $repository */
-$repository = $_SESSION['repository'];
-$error = '';
-$success = '';
-$terpilih = null;
+function kembali(string $tujuan = 'index.php'): never {
+    header('Location: ' . $tujuan, true, 303); exit;
+}
 
-function aman(string $nilai): string { return htmlspecialchars($nilai, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
-function rupiah(float $nilai): string { return 'Rp ' . number_format($nilai, 0, ',', '.'); }
+if (!isset($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
+$repo = new DataMahasiswa(is_array($_SESSION['mahasiswa'] ?? null) ? $_SESSION['mahasiswa'] : []);
+$error = '';
+$pesan = (string)($_SESSION['pesan'] ?? '');
+unset($_SESSION['pesan']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        $aksi = (string) ($_POST['aksi'] ?? '');
-        if ($aksi === 'hapus') {
-            $nim = trim((string) ($_POST['nim'] ?? ''));
-            if (!$repository->hapus($nim)) throw new InvalidArgumentException('Mahasiswa tidak ditemukan.');
-            $success = 'Data mahasiswa berhasil dihapus.';
-        } elseif ($aksi === 'simpan') {
-            $nim = trim((string) ($_POST['nim'] ?? ''));
-            $nama = (string) ($_POST['nama'] ?? '');
-            $prodi = (string) ($_POST['prodi'] ?? '');
-            $semester = filter_var($_POST['semester'] ?? null, FILTER_VALIDATE_INT);
-            $ukt = filter_var($_POST['ukt'] ?? null, FILTER_VALIDATE_FLOAT);
-            $potongan = filter_var($_POST['potongan'] ?? '0', FILTER_VALIDATE_FLOAT);
-
-            if ($semester === false || $ukt === false || $potongan === false) {
-                throw new InvalidArgumentException('Semester, UKT, dan potongan harus berupa angka yang valid.');
-            }
-
-            $jenis = (string) ($_POST['jenis'] ?? '');
-            if ($jenis === 'reguler') {
-                $m = new MahasiswaReguler($nim, $nama, $prodi, $semester, $ukt);
-            } elseif ($jenis === 'beasiswa') {
-                $m = new MahasiswaBeasiswa($nim, $nama, $prodi, $semester, $ukt, $potongan);
+    $aksi = teksPost('aksi');
+    if (!hash_equals((string)$_SESSION['csrf'], teksPost('csrf'))) {
+        $error = 'Token keamanan tidak cocok. Muat ulang halaman.';
+    } else {
+        try {
+            if ($aksi === 'hapus') {
+                $nim = teksPost('nim_lama');
+                if (!$repo->hapus($nim)) throw new InvalidArgumentException('Data tidak ditemukan.');
+                $_SESSION['pesan'] = 'Data mahasiswa berhasil dihapus.';
+            } elseif ($aksi === 'tambah' || $aksi === 'ubah') {
+                $semesterMentah = teksPost('semester');
+                $semester = filter_var($semesterMentah, FILTER_VALIDATE_INT);
+                if ($semester === false) throw new InvalidArgumentException('Semester harus berupa bilangan bulat.');
+                $nim = $aksi === 'ubah' ? teksPost('nim_lama') : teksPost('nim');
+                if ($aksi === 'ubah' && $repo->cari($nim) === null) {
+                    throw new InvalidArgumentException('Mahasiswa yang akan diubah tidak ditemukan.');
+                }
+                $m = new Mahasiswa(
+                    $nim, teksPost('nama'), teksPost('fakultas'), teksPost('prodi'),
+                    teksPost('asalSekolah'), $semester, teksPost('hobi'), teksPost('agama')
+                );
+                $berhasil = $aksi === 'tambah' ? $repo->tambah($m) : $repo->ubah($nim, $m);
+                if (!$berhasil) throw new InvalidArgumentException('NIM sudah ada atau perubahan tidak dapat disimpan.');
+                $_SESSION['pesan'] = $aksi === 'tambah' ? 'Mahasiswa berhasil ditambahkan.' : 'Mahasiswa berhasil diperbarui.';
             } else {
-                throw new InvalidArgumentException('Pilih jenis mahasiswa yang valid.');
+                throw new InvalidArgumentException('Aksi tidak dikenal.');
             }
-
-            $mode = (string) ($_POST['mode'] ?? 'tambah');
-            if ($mode === 'edit') {
-                if (!$repository->ubah($nim, $m)) throw new InvalidArgumentException('Mahasiswa tidak ditemukan.');
-                $success = 'Data mahasiswa berhasil diperbarui.';
-            } elseif ($mode === 'tambah') {
-                if (!$repository->tambah($m)) throw new InvalidArgumentException('NIM sudah terdaftar.');
-                $success = 'Data mahasiswa berhasil ditambahkan.';
-            } else {
-                throw new InvalidArgumentException('Mode form tidak valid.');
-            }
-        } else {
-            throw new InvalidArgumentException('Aksi tidak dikenal.');
+            $_SESSION['mahasiswa'] = $repo->semua();
+            kembali();
+        } catch (InvalidArgumentException $e) {
+            $error = $e->getMessage();
         }
-
-        $_SESSION['repository'] = $repository;
-        $_SESSION['flash'] = $success;
-        header('Location: index.php');
-        exit;
-    } catch (InvalidArgumentException $e) {
-        $error = $e->getMessage();
     }
 }
-
-if (isset($_SESSION['flash'])) {
-    $success = (string) $_SESSION['flash'];
-    unset($_SESSION['flash']);
+$nimEdit = trim((string)($_GET['edit'] ?? ''));
+$edit = $nimEdit !== '' ? $repo->cari($nimEdit) : null;
+if ($nimEdit !== '' && $edit === null && $error === '') $error = 'NIM untuk edit tidak ditemukan.';
+$fields = [
+    'nim' => 'NIM', 'nama' => 'Nama', 'fakultas' => 'Fakultas',
+    'prodi' => 'Program Studi', 'asalSekolah' => 'Asal Sekolah',
+    'semester' => 'Semester', 'hobi' => 'Hobi', 'agama' => 'Agama',
+];
+$nilaiEdit = $edit ? [
+    'nim' => $edit->getNim(), 'nama' => $edit->getNama(),
+    'fakultas' => $edit->getFakultas(), 'prodi' => $edit->getProdi(),
+    'asalSekolah' => $edit->getAsalSekolah(), 'semester' => $edit->getSemester(),
+    'hobi' => $edit->getHobi(), 'agama' => $edit->getAgama(),
+] : [];
+if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST' && teksPost('aksi') !== 'hapus') {
+    foreach (array_keys($fields) as $k) {
+        if ($k !== 'nim' || $edit === null) $nilaiEdit[$k] = teksPost($k);
+    }
 }
-
-if (isset($_GET['edit'])) $terpilih = $repository->cari((string) $_GET['edit']);
-$cari = trim((string) ($_GET['q'] ?? ''));
-$barisData = array_filter($repository->semua(), static function (Mahasiswa $m) use ($cari): bool {
-    return $cari === '' || stripos($m->getNim() . ' ' . $m->getNama() . ' ' . $m->getProdi(), $cari) !== false;
-});
 ?>
 <!doctype html>
-<html lang="id">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>CRUD Mahasiswa — Inheritance</title>
-    <style>
-        :root { font-family: system-ui, Arial, sans-serif; color: #172c4c; background: #f3f7fc; }
-        body { max-width: 1120px; margin: 35px auto; padding: 0 16px; }
-        h1 { margin-bottom: 4px; }
-        p { color: #5b6980; }
-        .panel { background: #fff; border-radius: 14px; padding: 22px; margin: 20px 0; box-shadow: 0 6px 24px #102b5010; }
-        .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-        label { display: block; font-size: 13px; font-weight: 650; margin-bottom: 5px; }
-        input, select { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 7px; }
-        button, .btn { background: #1764b5; color: white; padding: 10px 15px; border: 0; border-radius: 7px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .muted { background: #e8eff7; color: #183a61; }
-        .danger { background: #c33849; }
-        .actions { display: flex; gap: 7px; align-items: center; }
-        .alert { padding: 12px; border-radius: 8px; background: #e4f8e9; margin-bottom: 10px; }
-        .error { background: #ffe7e7; color: #c33849; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e4eaf2; }
-        th { background: #e9f2fd; }
-        small { color: #65758b; }
-        .scroll { overflow-x: auto; }
-    </style>
-</head>
-<body>
-    <h1>🎓 CRUD Data Mahasiswa — Inheritance</h1>
-    <p>Praktikum PBO Pertemuan 06 · Parent Class, Child Class, Overriding, dan Polimorfisme</p>
-
-    <?php if ($success !== ''): ?><div class="alert"><?=aman($success)?></div><?php endif; ?>
-    <?php if ($error !== ''): ?><div class="alert error"><?=aman($error)?></div><?php endif; ?>
-
-    <section class="panel">
-        <h2><?= $terpilih ? 'Edit Data Mahasiswa' : 'Tambah Mahasiswa Baru' ?></h2>
-        <form method="post">
-            <input type="hidden" name="aksi" value="simpan">
-            <input type="hidden" name="mode" value="<?= $terpilih ? 'edit' : 'tambah' ?>">
-            
-            <div class="fields">
-                <div>
-                    <label>NIM (Tidak dapat diubah)</label>
-                    <input name="nim" required value="<?=aman($terpilih?->getNim() ?? '')?>" <?= $terpilih ? 'readonly' : '' ?>>
-                </div>
-                <div>
-                    <label>Nama Lengkap</label>
-                    <input name="nama" required value="<?=aman($terpilih?->getNama() ?? '')?>">
-                </div>
-                <div>
-                    <label>Program Studi</label>
-                    <input name="prodi" required value="<?=aman($terpilih?->getProdi() ?? '')?>">
-                </div>
-                <div>
-                    <label>Semester (1–14)</label>
-                    <input name="semester" type="number" min="1" max="14" required value="<?=aman((string)($terpilih?->getSemester() ?? 1))?>">
-                </div>
-                <div>
-                    <label>Jenis Mahasiswa</label>
-                    <select name="jenis" id="jenis">
-                        <option value="reguler" <?=!($terpilih instanceof MahasiswaBeasiswa) ? 'selected' : ''?>>Mahasiswa Reguler</option>
-                        <option value="beasiswa" <?=$terpilih instanceof MahasiswaBeasiswa ? 'selected' : ''?>>Mahasiswa Beasiswa</option>
-                    </select>
-                </div>
-                <div>
-                    <label>UKT Pokok (Rp)</label>
-                    <input name="ukt" type="number" min="0" step="1000" required value="<?=aman((string)($terpilih?->getUkt() ?? 5000000))?>">
-                </div>
-                <div id="kolom-potongan">
-                    <label>Potongan Beasiswa (%)</label>
-                    <input name="potongan" type="number" min="0" max="100" step="0.1" value="<?=aman((string)($terpilih?->getPotonganPersen() ?? 50))?>">
-                </div>
-            </div>
-            
-            <p>
-                <button type="submit"><?= $terpilih ? 'Simpan Perubahan' : 'Tambah Mahasiswa' ?></button> 
-                <a class="btn muted" href="index.php">Reset Form</a>
-            </p>
-        </form>
-    </section>
-
-    <section class="panel">
-        <h2>Daftar Mahasiswa (<?=count($barisData)?>)</h2>
-        <form method="get" class="actions" style="margin-bottom:16px">
-            <input name="q" placeholder="Cari NIM, Nama, atau Prodi" value="<?=aman($cari)?>">
-            <button>Cari</button>
-            <a class="btn muted" href="index.php">Semua Data</a>
-        </form>
-
-        <div class="scroll">
-            <table>
-                <thead>
-                    <tr>
-                        <th>NIM</th>
-                        <th>Nama</th>
-                        <th>Prodi</th>
-                        <th>Semester</th>
-                        <th>Jenis</th>
-                        <th>UKT Pokok</th>
-                        <th>Potongan</th>
-                        <th>Biaya Akhir</th>
-                        <th>Aksi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($barisData as $m): ?>
-                    <tr>
-                        <td><?=aman($m->getNim())?></td>
-                        <td><?=aman($m->getNama())?></td>
-                        <td><?=aman($m->getProdi())?></td>
-                        <td><?=$m->getSemester()?></td>
-                        <td><?=aman($m->getJenis())?></td>
-                        <td><?=rupiah($m->getUkt())?></td>
-                        <td><?=number_format($m->getPotonganPersen(), 1)?>%</td>
-                        <td><strong><?=rupiah($m->hitungBiaya())?></strong></td>
-                        <td>
-                            <div class="actions">
-                                <a class="btn muted" href="?edit=<?=urlencode($m->getNim())?>">Edit</a>
-                                <form method="post" onsubmit="return confirm('Hapus data mahasiswa ini?')">
-                                    <input type="hidden" name="aksi" value="hapus">
-                                    <input type="hidden" name="nim" value="<?=aman($m->getNim())?>">
-                                    <button class="danger">Hapus</button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <?php if (!$barisData): ?>
-                        <tr><td colspan="9">Data mahasiswa tidak ditemukan.</td></tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-        <p><small>Data disimpan pada Session PHP lokal untuk simulasi praktikum.</small></p>
-    </section>
-
-    <script>
-        const jenisSelect = document.getElementById('jenis');
-        const kolomPotongan = document.getElementById('kolom-potongan');
-        
-        function aturTampilanForm() {
-            kolomPotongan.style.display = (jenisSelect.value === 'beasiswa') ? 'block' : 'none';
-        }
-        
-        jenisSelect.addEventListener('change', aturTampilanForm);
-        aturTampilanForm();
-    </script>
-</body>
-</html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Praktikum 5 — CRUD Mahasiswa (Enkapsulasi)</title>
+<style>
+:root{font-family:system-ui,Arial,sans-serif;color:#16324f;background:#f2f7fc}*{box-sizing:border-box}body{margin:0}main{max-width:1150px;margin:35px auto;padding:0 18px}h1{margin-bottom:5px}.sub{color:#61758c;margin-top:0}.card{background:white;border:1px solid #dae6f0;border-radius:14px;padding:24px;margin:20px 0;box-shadow:0 5px 18px #173b5810}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}label{font-weight:600;font-size:14px;display:block}input,select{width:100%;padding:10px;border:1px solid #aabfd0;border-radius:8px;margin-top:6px;font:inherit}input[readonly]{background:#eaf0f5}.actions{display:flex;gap:10px;margin-top:18px;align-items:center}.btn,button{display:inline-block;background:#126aa0;color:white;padding:9px 15px;border:0;border-radius:8px;text-decoration:none;font:inherit;cursor:pointer}.btn.alt{background:#dcebf4;color:#16324f}.danger{background:#b63e52}.notice{padding:13px;border-radius:9px;background:#e4f7ee;color:#176a47}.error{padding:13px;border-radius:9px;background:#ffebed;color:#9d2535}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:11px 8px;border-bottom:1px solid #e4edf4;text-align:left}th{background:#e8f2f9}.scroll{overflow-x:auto}.inline{display:inline}.small{font-size:12px;color:#6b7c8d}@media(max-width:650px){.grid{grid-template-columns:1fr}}
+</style></head><body><main>
+<h1>CRUD Data Mahasiswa</h1>
+  <p class="sub">Pertemuan 5 — Enkapsulasi: property private, getter, validasi, dan repository.</p>
+    <?php if ($pesan !== ''): ?><p class="notice"><?= aman($pesan) ?></p><?php endif; ?>
+    <?php if ($error !== ''): ?><p class="error"><?= aman($error) ?></p><?php endif; ?>
+    <section class="card"><h2><?= $edit ? 'Edit Mahasiswa' : 'Tambah Mahasiswa' ?></h2>
+    <form method="post" action="<?= $edit ? 'index.php?edit=' . rawurlencode($edit->getNim()) : 'index.php' ?>">
+        <input type="hidden" name="csrf" value="<?= aman($_SESSION['csrf']) ?>">
+        <input type="hidden" name="aksi" value="<?= $edit ? 'ubah' : 'tambah' ?>">
+        <?php if ($edit): ?><input type="hidden" name="nim_lama" value="<?= aman($edit->getNim()) ?>"><?php endif; ?>
+        <div class="grid">
+        <?php foreach ($fields as $key => $label): ?>
+            <label><?= aman($label) ?>
+            <?php if ($key === 'agama'): ?>
+            <select name="agama" required><option value="">-- Pilih Agama --</option>
+            <?php foreach (Mahasiswa::AGAMA as $agama): ?><option value="<?= aman($agama) ?>" <?= ($nilaiEdit['agama'] ?? '') === $agama ? 'selected' : '' ?>><?= aman($agama) ?></option><?php endforeach; ?>
+            </select>
+            <?php else: ?>
+            <input name="<?= aman($key) ?>" value="<?= aman($nilaiEdit[$key] ?? '') ?>"
+            <?= $key === 'semester' ? 'type="number" min="1" max="14"' : 'type="text"' ?>
+            <?= $key === 'nim' && $edit ? 'readonly' : '' ?>
+            <?= $key !== 'hobi' ? 'required' : '' ?>>
+            <?php endif; ?>
+            </label>
+        <?php endforeach; ?>
+    </div><div class="actions"><button type="submit"><?= $edit ? 'Simpan Perubahan' : 'Tambah Data' ?></button>
+        <?php if ($edit): ?><a class="btn alt" href="index.php">Batal Edit</a><?php endif; ?>
+    </div>
+   </form>
+    <p class="small">NIM tidak dapat diubah saat edit. Validasi utama dilakukan oleh class Mahasiswa, bukan hanya atribut HTML.</p></section>
+    <section class="card"><h2>Daftar Mahasiswa (<?= count($repo->semua()) ?>)</h2>
+    <div class="scroll"><table>
+    <thead>
+    <tr>
+    <?php foreach ($fields as $label): ?><th><?= aman($label) ?></th><?php endforeach; ?><th>Aksi</th>
+    </tr>
+    </thead><tbody>
+    <?php foreach ($repo->semua() as $m): ?>
+    <tr>
+    <td><?= aman($m->getNim()) ?></td><td><?= aman($m->getNama()) ?></td>
+    <td><?= aman($m->getFakultas()) ?></td><td><?= aman($m->getProdi()) ?></td>
+    <td><?= aman($m->getAsalSekolah()) ?></td><td><?= aman($m->getSemester()) ?></td>
+    <td><?= aman($m->getHobi()) ?></td><td><?= aman($m->getAgama()) ?></td>
+    <td><a class="btn" href="?edit=<?= rawurlencode($m->getNim()) ?>">Edit</a>
+    <form method="post" class="inline" onsubmit="return confirm('Hapus mahasiswa ini?')">
+        <input type="hidden" name="csrf" value="<?= aman($_SESSION['csrf']) ?>">
+        <input type="hidden" name="aksi" value="hapus">
+        <input type="hidden" name="nim_lama" value="<?= aman($m->getNim()) ?>">
+        <button class="danger" type="submit">Hapus</button></form></td>
+    </tr>
+    <?php endforeach; ?>
+    <?php if (!$repo->semua()): ?>
+        <tr><td colspan="9">Belum ada data mahasiswa.</td></tr>
+    <?php endif; ?>
+    </tbody>
+    </table>
+    </div>
+</section>
+</main>
+</body></html>
